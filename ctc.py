@@ -1,3 +1,5 @@
+import numpy
+
 from theano import tensor, scan
 
 from blocks.bricks import Brick
@@ -31,7 +33,7 @@ class CTC(Brick):
         B = l.shape[1]
         
         # l_blk = l with interleaved blanks
-        l_blk = C * tensor.ones((S, B))
+        l_blk = C * tensor.ones((S, B), dtype='int32')
         l_blk = tensor.set_subtensor(l_blk[1::2,:],l)
         l_blk = l_blk.T     # now l_blk is B x S
 
@@ -41,8 +43,8 @@ class CTC(Brick):
         #   T x B
         # first value of alpha (size B x S)
         alpha0 = tensor.concatenate([
-                                        probs[0, :, C],
-                                        probs[0][tensor.arange(B), l[0]],
+                                        probs[0, :, C][:,None],
+                                        probs[0][tensor.arange(B), l[0]][:,None],
                                         tensor.zeros((B, S-2))
                                     ], axis=1)
         c0 = alpha0.sum(axis=1)
@@ -50,18 +52,17 @@ class CTC(Brick):
 
         # recursion
         l_blk_2 = tensor.concatenate([-tensor.ones((B,2)), l_blk[:,:-2]], axis=1)
-        l_case2 = tensor.ne(l_blk, numpy.float32(C)) * tensor.ne(l_blk, l_blk_2)
+        l_case2 = tensor.neq(l_blk, C) * tensor.neq(l_blk, l_blk_2)
         # l_case2 is B x S
 
         def recursion(p, p_mask, prev_alpha, prev_c):
-            prev_alpha = prev_alpha[-1]
             # p is B x C+1
             # prev_alpha is B x S 
             prev_alpha_1 = tensor.concatenate([tensor.zeros((B,1)),prev_alpha[:,:-1]], axis=1)
             prev_alpha_2 = tensor.concatenate([tensor.zeros((B,2)),prev_alpha[:,:-2]], axis=1)
 
-            alphabar = prev_alpha + prev_alpha1
-            alphabar = tensor.switch(l_case2, alphabar + prev_alpha2, alphabar)
+            alpha_bar = prev_alpha + prev_alpha_1
+            alpha_bar = tensor.switch(l_case2, alpha_bar + prev_alpha_2, alpha_bar)
             next_alpha = alpha_bar * p[tensor.arange(B)[:,None].repeat(S,axis=1).flatten(), l_blk.flatten()].reshape((B,S))
             next_alpha = tensor.switch(p_mask[:,None], next_alpha, prev_alpha)
             next_c = next_alpha.sum(axis=1)
@@ -69,9 +70,9 @@ class CTC(Brick):
             return next_alpha / next_c[:, None], next_c
 
         # apply the recursion with scan
-        alpha, c = tensor.scan(fn=recursion,
-                               sequences=[probs, probs_mask],
-                               outputs_info=[alpha0, c0])
+        [alpha, c], _ = scan(fn=recursion,
+                             sequences=[probs, probs_mask],
+                             outputs_info=[alpha0, c0])
 
         # return the log probability of the labellings
         return tensor.log(c).sum(axis=0)

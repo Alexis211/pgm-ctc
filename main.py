@@ -92,7 +92,7 @@ y_hat.name = 'y_hat'
 y_hat_mask = x_mask
 
 # Cost
-cost = CTC().apply(y, y_hat, y_mask, y_hat_mask)
+cost = CTC().apply(y, y_hat, y_mask.sum(axis=1), y_hat_mask).mean()
 cost.name = 'CTC'
 
 # Initialization
