@@ -73,10 +73,75 @@ class CTC(Brick):
                              sequences=[probs, probs_mask],
                              outputs_info=[alpha0, c0])
 
-        prob = tensor.log(c).sum(axis=0) + tensor.log(alpha[-1][tensor.arange(B), 2*l_len.astype('int32')-1]
-                                                      + alpha[-1][tensor.arange(B), 2*l_len.astype('int32')])
+        # c = theano.printing.Print('c')(c)
+        last_alpha = alpha[-1]
+        # last_alpha = theano.printing.Print('a-1')(last_alpha)
+
+        prob = tensor.log(c).sum(axis=0) + tensor.log(last_alpha[tensor.arange(B), 2*l_len.astype('int32')-1]
+                                                      + last_alpha[tensor.arange(B), 2*l_len.astype('int32')]
+                                                      + 1e-30)
 
         # return the log probability of the labellings
+        return -prob
+
+    def apply_log_domain(self, l, probs, l_len=None, probs_mask=None):
+        # Does the same computation as apply, but alpha is in the log domain
+        # This avoids numerical underflow issues that were not corrected in the previous version.
+
+        def _log(a):
+            return tensor.log(tensor.clip(a, 1e-12, 1e12))
+
+        def _log_add(a, b):
+            maximum = tensor.maximum(a, b)
+            return (maximum + tensor.log1p(tensor.exp(a + b - 2 * maximum)))
+
+        def _log_mul(a, b):
+            return a + b
+
+        # See comments above
+        B = probs.shape[1]
+        C = probs.shape[2]-1
+        L = l.shape[0]
+        S = 2*L+1
+        
+        l_blk = C * tensor.ones((S, B), dtype='int32')
+        l_blk = tensor.set_subtensor(l_blk[1::2,:], l)
+        l_blk = l_blk.T     # now l_blk is B x S
+
+        alpha0 = tensor.concatenate([   tensor.ones((B, 1)),
+                                        tensor.zeros((B, S-1))
+                                    ], axis=1)
+        alpha0 = _log(alpha0)
+
+        l_blk_2 = tensor.concatenate([-tensor.ones((B,2)), l_blk[:,:-2]], axis=1)
+        l_case2 = tensor.neq(l_blk, C) * tensor.neq(l_blk, l_blk_2)
+
+        def recursion(p, p_mask, prev_alpha):
+            prev_alpha_1 = tensor.concatenate([tensor.zeros((B,1)),prev_alpha[:,:-1]], axis=1)
+            prev_alpha_2 = tensor.concatenate([tensor.zeros((B,2)),prev_alpha[:,:-2]], axis=1)
+
+            alpha_bar1 = tensor.set_subtensor(prev_alpha[:,1:], _log_add(prev_alpha[:,1:],prev_alpha[:,:-1]))
+            alpha_bar2 = tensor.set_subtensor(alpha_bar1[:,2:], _log_add(alpha_bar1[:,2:],prev_alpha[:,:-2]))
+
+            alpha_bar = tensor.switch(l_case2, alpha_bar2, alpha_bar1)
+
+            probs = _log(p[tensor.arange(B)[:,None].repeat(S,axis=1).flatten(), l_blk.flatten()].reshape((B,S)))
+            next_alpha = _log_mul(alpha_bar, probs)
+            next_alpha = tensor.switch(p_mask[:,None], next_alpha, prev_alpha)
+            
+            return next_alpha
+
+        alpha, _ = scan(fn=recursion,
+                             sequences=[probs, probs_mask],
+                             outputs_info=[alpha0])
+
+        last_alpha = alpha[-1]
+        # last_alpha = theano.printing.Print('a-1')(last_alpha)
+
+        prob = _log_add(last_alpha[tensor.arange(B), 2*l_len.astype('int32')-1],
+                        last_alpha[tensor.arange(B), 2*l_len.astype('int32')])
+
+        # return the negative log probability of the labellings
         return -prob
 
     

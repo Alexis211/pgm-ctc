@@ -1,3 +1,15 @@
 __pycache__/
 *.pyc
 *.swp
+
+*.aux
+*.log
+*.toc
+*.out
+*.nav
+*.snm
+*.pdf
+*.pdf_tex
+*.bbl
+*.blg
+!projet/Report/final/*

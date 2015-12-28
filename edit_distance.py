@@ -8,6 +8,10 @@ def batch_edit_distance(a, a_len, b, b_len):
     B = a.shape[0]
     assert b.shape[0] == B
 
+    for i in range(B):
+        print "A:", a[i, :a_len[i]]
+        print "B:", b[i, :b_len[i]]
+
     q = max(a.shape[1], b.shape[1]) * numpy.ones((B, a.shape[1]+1, b.shape[1]+1), dtype='int32')
     q[:, 0, 0] = 0
 
