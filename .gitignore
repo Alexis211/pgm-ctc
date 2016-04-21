@@ -8,7 +8,6 @@ __pycache__/
 *.out
 *.nav
 *.snm
-*.pdf
 *.pdf_tex
 *.bbl
 *.blg
